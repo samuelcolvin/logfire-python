@@ -1,0 +1,3 @@
+# logfire python client
+
+work in progress...
