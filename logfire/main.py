@@ -1,13 +1,17 @@
 import sys
-from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Union, TYPE_CHECKING
 
+from .format import format_message
+from .record import LogLevels, Record, get_stack
 from .send import ThreadSender
-from .toolbox import get_stack
-from .record import LogLevels, Record
 
 __all__ = ('LogClient',)
+
+if TYPE_CHECKING:
+    ExcType = Union[bool, BaseException]
+
+DFT_TEMPLATE = '{_args_}'
 
 
 class LogClient:
@@ -18,57 +22,64 @@ class LogClient:
     def set(self, log_level: LogLevels):
         self._level = log_level
 
-    def log(self, level: LogLevels, template: str, *args: Any, **kwargs: Any):
-        if self._level >= level:
-            self._log(level, template, *args, **kwargs)
+    def log(self, level: LogLevels, template: str = DFT_TEMPLATE, *args: Any, exc_: 'ExcType' = False, **kwargs: Any):
+        if self._level <= level:
+            self._log(level, template, *args, exc_=exc_, **kwargs)
 
-    def debug(self, template: str, *args: Any, **kwargs: Any):
-        if self._level >= LogLevels.debug:
-            self._log(LogLevels.debug, template, *args, **kwargs)
+    def debug(self, template: str = DFT_TEMPLATE, *args: Any, exc_: 'ExcType' = False, **kwargs: Any):
+        if self._level <= LogLevels.debug:
+            self._log(LogLevels.debug, template, *args, exc_=exc_, **kwargs)
 
-    def info(self, template: str, *args: Any, **kwargs: Any):
-        if self._level >= LogLevels.info:
-            self._log(LogLevels.info, template, *args, **kwargs)
+    def info(self, template: str = DFT_TEMPLATE, *args: Any, exc_: 'ExcType' = False, **kwargs: Any):
+        if self._level <= LogLevels.info:
+            self._log(LogLevels.info, template, *args, exc_=exc_, **kwargs)
 
-    def notice(self, template: str, *args: Any, **kwargs: Any):
-        if self._level >= LogLevels.notice:
-            self._log(LogLevels.notice, template, *args, **kwargs)
+    def notice(self, template: str = DFT_TEMPLATE, *args: Any, exc_: 'ExcType' = False, **kwargs: Any):
+        if self._level <= LogLevels.notice:
+            self._log(LogLevels.notice, template, *args, exc_=exc_, **kwargs)
 
-    def warning(self, template: str, *args: Any, **kwargs: Any):
-        if self._level >= LogLevels.warning:
-            self._log(LogLevels.warning, template, *args, **kwargs)
+    def warning(self, template: str = DFT_TEMPLATE, *args: Any, exc_: 'ExcType' = True, **kwargs: Any):
+        if self._level <= LogLevels.warning:
+            self._log(LogLevels.warning, template, *args, exc_=exc_, **kwargs)
 
-    def error(self, template: str, *args: Any, **kwargs: Any):
-        if self._level >= LogLevels.error:
-            self._log(LogLevels.error, template, *args, **kwargs)
+    def error(self, template: str = DFT_TEMPLATE, *args: Any, exc_: 'ExcType' = True, **kwargs: Any):
+        if self._level <= LogLevels.error:
+            self._log(LogLevels.error, template, *args, exc_=exc_, **kwargs)
 
-    def critical(self, template: str, *args: Any, **kwargs: Any):
-        if self._level >= LogLevels.critical:
-            self._log(LogLevels.critical, template, *args, **kwargs)
+    def critical(self, template: str = DFT_TEMPLATE, *args: Any, exc_: 'ExcType' = True, **kwargs: Any):
+        self._log(LogLevels.critical, template, *args, exc_=exc_, **kwargs)
 
-    def _log(self, level: LogLevels, template: str, *args, **kwargs: Any):
-        args = deepcopy(args)
-        kwargs = deepcopy(kwargs)
+    def _log(self, level: LogLevels, template: str = DFT_TEMPLATE, *args, exc_: 'ExcType' = False, **kwargs: Any):
+        exc = None
+        if exc_ is True:
+            exc = sys.exc_info()[1]
+        elif isinstance(exc_, BaseException):
+            exc = exc_
+        elif exc_ not in {False, None}:
+            # TODO warning or error
+            raise TypeError('exc_ should be either a bool or an exception instance')
+
         record = Record(
             ts=self._now(),
             level=level,
             template=template,
-            message=template.format(*args, **kwargs),
+            message=format_message(template, args, kwargs, exc),
             stack=get_stack(),
             args=args,
             kwargs=kwargs,
+            exc=exc,
         )
         self._print(record)
         self._send(record)
 
     @staticmethod
     def _print(r: Record):
-        print(f'{r.ts:%H:%M:%S}.{r.ts.microsecond / 1000::<3d} | {r.message}', file=sys.stderr, flush=True)
+        print(f'{r.ts:%H:%M:%S}.{r.ts.microsecond // 1000:<3d}    {r.message}', file=sys.stderr, flush=True)
 
     def _send(self, r: Record):
-        if self.sender is None:
-            self.sender = ThreadSender()
-        self.sender.put(r)
+        if self._sender is None:
+            self._sender = ThreadSender()
+        self._sender.put(r)
 
     @staticmethod
     def _now():
