@@ -23,7 +23,7 @@ class RenderArgs:
         return str(self)
 
     def __str__(self) -> str:
-        parts = [str(a) for a in self.args] + ['{}={}'.format(*kv) for kv in self.kwargs.items()]
+        parts = [repr(a) for a in self.args] + ['{}={!r}'.format(*kv) for kv in self.kwargs.items()]
         if self.exc:
             parts.append('{}: {}'.format(self.exc.__class__.__name__, self.exc))
         return ' '.join(parts)

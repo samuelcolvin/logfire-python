@@ -9,6 +9,10 @@ from time import time
 
 __all__ = ('ThreadSender',)
 
+from typing import List
+
+import httpx
+
 
 class ThreadSender:
     def __init__(self):
@@ -27,7 +31,7 @@ class ThreadSender:
         finally:
             loop.close()
 
-    def put(self, record):
+    def put(self, record: str) -> None:
         self._queue.put(record)
 
     def finish(self):
@@ -49,8 +53,9 @@ class ThreadSenderDaemon:
         self._queue = queue
         self._send_interval = send_interval
         self._records = []
-        self.max_send = 10
+        self._max_send = 10
         self._loop = asyncio.get_event_loop()
+        self._client = httpx.AsyncClient()
 
     async def run(self):
         send_task = self._loop.create_task(self._send_forever(), name='send')
@@ -62,7 +67,8 @@ class ThreadSenderDaemon:
             except CancelledError:
                 pass
             if self._records:
-                await asyncio.shield(self._send())
+                await asyncio.shield(self._send(self._records))
+            await self._client.aclose()
 
     async def collect_records(self):
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -83,20 +89,22 @@ class ThreadSenderDaemon:
         while True:
             if self._records:
                 send_start = time()
-                await asyncio.shield(self._send())
-                sleep = max(self._send_interval - (time() - send_start), 0.1)
+                to_send, self._records = self._records[:self._max_send], self._records[self._max_send:]
+                await asyncio.shield(self._send(to_send))
+                sleep = max(self._send_interval - (time() - send_start), 0.01)
                 await asyncio.sleep(sleep)
             else:
                 await asyncio.sleep(0.01)
 
-    async def _send(self):
+    async def _send(self, records: List[str]) -> None:
         """
-        Send self._records and clear
+        Send self._records via https
         """
-        to_send = self._records[:]
-        self._records = []
-        n = datetime.now()
-        print(f'{n:%H:%M:%S}.{n.microsecond / 1000:0.0f} sending {to_send} on "{current_thread().name}"...')
-        await asyncio.sleep(1.2)
-        n = datetime.now()
-        print(f'{n:%H:%M:%S}.{n.microsecond / 1000:0.0f} sending {to_send} on "{current_thread().name}" done')
+        s = '[{}]'.format(','.join(records))
+        headers = {
+            'Content-Type': 'application/json',
+        }
+        print('sending...', len(records))
+        r = await self._client.post('https://webhook.site/93a08323-c2a0-471a-9643-c66540845f5e', data=s, headers=headers)
+        r.raise_for_status()
+        print(r.status_code)

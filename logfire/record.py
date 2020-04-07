@@ -18,21 +18,34 @@ class LogLevels(IntEnum):
 
 
 @dataclass
+class Frame:
+    filename: str
+    lineno: int
+    function: str
+    code_context: str
+
+
+@dataclass
 class Record:
-    ts: datetime
+    timestamp: datetime
     level: LogLevels
     template: str
     message: str
-    stack: List[Tuple[str, int]]
+    stack: List[Frame]
     args: Tuple[Any, ...]
     kwargs: Dict[str, Any]
     exc: Optional[BaseException] = None
 
 
-def get_stack() -> List[Tuple[str, int]]:
-    external_frames: List[Tuple[str, int]] = []
+def get_stack() -> List[Frame]:
+    external_frames: List[Frame] = []
     for f in inspect.getouterframes(inspect.currentframe(), context=0):
         if not re.search(r'/logfire/[a-z_]+\.py$', f.filename):
-            external_frames.append((f.filename, f.lineno))
+            external_frames.append(Frame(
+                filename=f.filename,
+                lineno=f.lineno,
+                function=f.function,
+                code_context=f.code_context,
+            ))
 
     return external_frames

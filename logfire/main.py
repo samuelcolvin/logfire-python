@@ -1,3 +1,4 @@
+import json
 import sys
 from datetime import datetime, timezone
 from typing import Any, Union, TYPE_CHECKING
@@ -5,6 +6,7 @@ from typing import Any, Union, TYPE_CHECKING
 from .format import format_message
 from .record import LogLevels, Record, get_stack
 from .send import ThreadSender
+from .serialize import json_encoder
 
 __all__ = ('LogClient',)
 
@@ -50,6 +52,7 @@ class LogClient:
         self._log(LogLevels.critical, template, *args, exc_=exc_, **kwargs)
 
     def _log(self, level: LogLevels, template: str = DFT_TEMPLATE, *args, exc_: 'ExcType' = False, **kwargs: Any):
+        timestamp = self._now()
         exc = None
         if exc_ is True:
             exc = sys.exc_info()[1]
@@ -60,7 +63,7 @@ class LogClient:
             raise TypeError('exc_ should be either a bool or an exception instance')
 
         record = Record(
-            ts=self._now(),
+            timestamp=timestamp,
             level=level,
             template=template,
             message=format_message(template, args, kwargs, exc),
@@ -74,12 +77,27 @@ class LogClient:
 
     @staticmethod
     def _print(r: Record):
-        print(f'{r.ts:%H:%M:%S}.{r.ts.microsecond // 1000:<3d}    {r.message}', file=sys.stderr, flush=True)
+        ts = r.timestamp
+        print(f'{ts:%H:%M:%S}.{ts.microsecond // 1000:<3d}    {r.message}', file=sys.stderr, flush=True)
 
     def _send(self, r: Record):
         if self._sender is None:
             self._sender = ThreadSender()
-        self._sender.put(r)
+        data = dict(
+            timestamp=r.timestamp,
+            level=r.level,
+            message=r.message,
+            stack=[(f.filename, f.lineno) for f in r.stack],
+        )
+        if r.args:
+            data['args'] = r.args
+        if r.kwargs:
+            data['kwargs'] = r.kwargs
+        if r.exc:
+            data['exc'] = {'type': r.exc.__class__.__name__, 'value': str(r.exc)}
+
+        s = json.dumps(data, default=json_encoder)
+        self._sender.put(s)
 
     @staticmethod
     def _now():
